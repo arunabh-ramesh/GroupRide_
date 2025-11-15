@@ -21,6 +21,7 @@ const database = firebase.database();
 
 function App() {
     const [user, setUser] = useState(null);
+    const [authInitializing, setAuthInitializing] = useState(true);
     const [groupCode, setGroupCode] = useState('');
     const [currentGroup, setCurrentGroup] = useState(null);
     const [username, setUsername] = useState('');
@@ -34,9 +35,14 @@ function App() {
     const [locationError, setLocationError] = useState('');
     const [showLocationHelp, setShowLocationHelp] = useState(false);
     const [detectedPlatform, setDetectedPlatform] = useState('');
+    const [pinMode, setPinMode] = useState(false);
+    const [groupPins, setGroupPins] = useState({});
     const mapRef = useRef(null);
     const mapInstanceRef = useRef(null);
     const markersRef = useRef({});
+    const pinMarkersRef = useRef({});
+    const pinModeRef = useRef(false);
+    const mapClickHandlerRef = useRef(null);
 
     // Centralized map initialization to avoid race conditions
     const initMapIfNeeded = () => {
@@ -98,6 +104,7 @@ function App() {
     useEffect(() => {
         const unsubscribe = auth.onAuthStateChanged((user) => {
             setUser(user);
+            setAuthInitializing(false);
         });
         return () => unsubscribe();
     }, []);
@@ -116,6 +123,45 @@ function App() {
     useEffect(() => {
         initMapIfNeeded();
     }, [currentGroup]);
+
+    // Update pinMode ref and attach/detach click handler
+    useEffect(() => {
+        pinModeRef.current = pinMode;
+        
+        if (!mapInstanceRef.current) return;
+        
+        // Remove old handler if exists
+        if (mapClickHandlerRef.current) {
+            mapInstanceRef.current.off('click', mapClickHandlerRef.current);
+        }
+        
+        // Add new handler
+        const handler = (e) => {
+            if (pinModeRef.current) {
+                const label = prompt('Enter a label for this pin:');
+                if (label && label.trim()) {
+                    const pinId = Date.now().toString();
+                    database.ref(`groups/${currentGroup}/pins/${pinId}`).set({
+                        lat: e.latlng.lat,
+                        lon: e.latlng.lng,
+                        label: label.trim(),
+                        createdBy: username,
+                        createdAt: Date.now()
+                    });
+                    setPinMode(false);
+                }
+            }
+        };
+        
+        mapClickHandlerRef.current = handler;
+        mapInstanceRef.current.on('click', handler);
+        
+        return () => {
+            if (mapInstanceRef.current && mapClickHandlerRef.current) {
+                mapInstanceRef.current.off('click', mapClickHandlerRef.current);
+            }
+        };
+    }, [pinMode, currentGroup, username]);
 
     // Invalidate size on window resize
     useEffect(() => {
@@ -201,6 +247,56 @@ function App() {
 
         return () => locationsRef.off();
     }, [currentGroup]);
+
+    // Listen to group pins
+    useEffect(() => {
+        if (!currentGroup) return;
+
+        const pinsRef = database.ref(`groups/${currentGroup}/pins`);
+        
+        pinsRef.on('value', (snapshot) => {
+            const pins = snapshot.val() || {};
+            setGroupPins(pins);
+            
+            // Update pin markers on map
+            if (mapInstanceRef.current) {
+                // Clear old pin markers
+                Object.values(pinMarkersRef.current).forEach(marker => marker.remove());
+                pinMarkersRef.current = {};
+                
+                // Add new pin markers
+                Object.entries(pins).forEach(([pinId, data]) => {
+                    if (data.lat && data.lon) {
+                        const pinIcon = L.icon({
+                            iconUrl: 'data:image/svg+xml;base64,' + btoa(`
+                                <svg xmlns="http://www.w3.org/2000/svg" width="32" height="40" viewBox="0 0 32 40">
+                                    <path fill="#e74c3c" stroke="#c0392b" stroke-width="2" d="M16 0C9.4 0 4 5.4 4 12c0 8 12 28 12 28s12-20 12-28c0-6.6-5.4-12-12-12z"/>
+                                    <circle cx="16" cy="12" r="6" fill="white"/>
+                                </svg>
+                            `),
+                            iconSize: [32, 40],
+                            iconAnchor: [16, 40],
+                            popupAnchor: [0, -40]
+                        });
+                        
+                        const marker = L.marker([data.lat, data.lon], { icon: pinIcon })
+                            .addTo(mapInstanceRef.current);
+                        
+                        marker.bindPopup(`
+                            <strong>${data.label}</strong><br>
+                            By: ${data.createdBy}<br>
+                            <small>${new Date(data.createdAt).toLocaleString()}</small><br>
+                            <button onclick="if(confirm('Delete this pin?')) { firebase.database().ref('groups/${currentGroup}/pins/${pinId}').remove(); }" style="margin-top:8px;padding:4px 8px;background:#e74c3c;color:white;border:none;border-radius:4px;cursor:pointer;">Delete Pin</button>
+                        `);
+                        
+                        pinMarkersRef.current[pinId] = marker;
+                    }
+                });
+            }
+        });
+
+        return () => pinsRef.off();
+    }, [currentGroup, username]);
 
     // Start location tracking when group is joined
     useEffect(() => {
@@ -452,6 +548,17 @@ function App() {
     };
 
     // Render username/login screen (only proceed after explicit sign-in)
+    if (authInitializing) {
+        return (
+            <div className="container">
+                <div className="auth-container">
+                    <h1>🏔️ Group Tracker</h1>
+                    <p className="subtitle">Loading...</p>
+                </div>
+            </div>
+        );
+    }
+
     if (!user) {
         return (
             <div className="container">
@@ -544,9 +651,18 @@ function App() {
                     <h2>{currentGroupName ? `${currentGroupName} (${currentGroup})` : `Group: ${currentGroup}`}</h2>
                     <span className="user-badge">{username} ({sport})</span>
                 </div>
-                <button onClick={handleLeaveGroup} className="btn btn-small">
-                    Leave
-                </button>
+                <div style={{ display: 'flex', gap: 8 }}>
+                    <button 
+                        onClick={() => setPinMode(!pinMode)} 
+                        className={`btn btn-small ${pinMode ? 'btn-primary' : 'btn-secondary'}`}
+                        style={{ background: pinMode ? '#e74c3c' : undefined }}
+                    >
+                        {pinMode ? '📍 Click Map to Place' : '📍 Add Pin'}
+                    </button>
+                    <button onClick={handleLeaveGroup} className="btn btn-small">
+                        Leave
+                    </button>
+                </div>
             </div>
             
             <div className="map-container">
