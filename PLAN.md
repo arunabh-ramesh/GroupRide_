@@ -149,5 +149,3 @@ You can follow this sequence:
    * Show live demo with two phones, one moving.
 
 ---
-
-If you tell me what language/framework your team is most comfortable with, I can give you a more specific implementation outline (screens, data schema, and pseudo-code for the location sync).
