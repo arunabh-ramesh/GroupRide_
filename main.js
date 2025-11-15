@@ -337,10 +337,7 @@ function App() {
                 finalCode = await generateGroupCode(6);
             }
             console.log('[CreateGroup] Final code selected:', finalCode);
-            setGroupCode(finalCode);
-            setCurrentGroup(finalCode); // triggers map view render
             const resolvedName = groupName.trim() ? groupName.trim() : finalCode;
-            setCurrentGroupName(resolvedName);
             // Write meta name
             await database.ref(`groups/${finalCode}/meta`).set({
                 name: resolvedName,
@@ -357,6 +354,10 @@ function App() {
             // Presence cleanup on disconnect
             database.ref(`groups/${finalCode}/members/${user.uid}`).onDisconnect().remove();
             database.ref(`groups/${finalCode}/locations/${user.uid}`).onDisconnect().remove();
+            // Only set state after all critical database operations succeed
+            setGroupCode(finalCode);
+            setCurrentGroup(finalCode); // triggers map view render
+            setCurrentGroupName(resolvedName);
             // Kick map init after state commits
             requestAnimationFrame(() => initMapIfNeeded());
             startLocationTracking();
