@@ -1,61 +1,39 @@
-Yes. I can help you and your team shape this into something you can actually demo by the end of the hackathon.
-
-Below is a concrete plan you can follow.
-
----
-
-## 1. Define a tight MVP (what you will demo)
-
-Minimum viable product:
+# Minimum Viable Product (MVP)
 
 1. Users can:
+   * Join a "group" (ride/ski session) with friends
+   * Share their live location on a specific mountain
+   * See all group members as dots on a trail map in near real time
 
-   * Join a “group” (ride / ski session) with friends.
-   * Share their live location on a specific mountain.
-   * See all group members as dots on a trail map in near real time.
-2. Basic safety:
+2. App will:
+   * Show distance between you and a selected friend
+   * Last-updated timestamp for each friend (so you know if someone dropped offline)
 
-   * Show distance between you and a selected friend.
-   * Last-updated timestamp for each friend (so you know if someone dropped offline).
+If there is time later, add:
+- "Ping" feature (send a "regroup at X" marker)
+- Simple SOS button that broadcasts "I need help" plus location to the group.
 
-If you have time later, add:
-
-* “Ping” feature (send a “regroup at X” marker).
-* Simple SOS button that broadcasts “I need help” plus location to the group.
-
-Keep the first demo goal: one phone moves around (or via simulator), everyone else sees the marker move on the map.
-
----
-
-## 2. Core features broken down
+# Core Features
 
 1. **Authentication / sessions**
-
-   * Simple: Sign in with Google/Email (Firebase Auth) or even just “enter a nickname + group code.”
-   * Groups/rooms: Users join a group via 4–6 letter code (e.g., “RIDE32”).
+   * Simple: Sign in with Google/Email (Firebase Auth) or even just "enter a nickname + group code"
+   * Groups/rooms: Users join a group via 4–6 letter code (e.g., "RIDE32")
 
 2. **Location tracking**
-
    * Phone periodically sends:
-
-     * `user_id`
-     * `lat`, `lon`
-     * `timestamp`
-     * `sport` (bike/ski)
-   * Update interval: e.g., every 2–5 seconds while app is active; slower in background.
+      * `user_id`
+      * `lat`, `lon`
+      * `timestamp`
+      * `sport` (bike/ski)
+   * Update interval: e.g., every 2–5 seconds while app is active; slower in background
 
 3. **Realtime map view**
-
-   * Map centered on the resort/mountain.
-   * Markers for each friend with name + time of last update.
-   * Tap a friend:
-
-     * Show distance and bearing (“420 m ahead, slightly left”).
+   * Map centered on the resort/mountain
+   * Markers for each friend with name + time of last update
 
 4. **Trail / mountain context**
-
-   * Base map: Mapbox / Google Maps.
-   * Optionally: overlay trail data (from Trailforks or OpenStreetMap) if you have time.
+   * Base map: Mapbox / Google Maps
+   * Optionally: overlay trail data (from Trailforks or OpenStreetMap) if time permits
 
 ---
 
