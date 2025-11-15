@@ -350,10 +350,18 @@ function App() {
                 
                 console.log(`Location update: [${latitude.toFixed(5)}, ${longitude.toFixed(5)}] accuracy=${accuracy}m source=${source}`);
 
-                // Only accept GPS-level accuracy (< 30m). All other sources
-                // (WiFi, BLE, IP-based) are rejected.
-                if (typeof accuracy !== 'number' || accuracy >= MAX_ACCEPTABLE_ACCURACY_METERS) {
-                    console.warn(`⚠️  Rejecting non-GPS location (source=${source}, accuracy=${accuracy}m). Keeping most recent GPS location.`);
+                // Prefer GPS-level accuracy (< MAX_ACCEPTABLE_ACCURACY_METERS), but
+                // allow the first/only location to be saved even if coarser. This
+                // prevents devices that only report a coarse fix from never sharing
+                // any location. Subsequent imprecise updates will be ignored so
+                // the most recent good GPS fix remains authoritative.
+                const isGpsQuality = (typeof accuracy === 'number' && accuracy < MAX_ACCEPTABLE_ACCURACY_METERS);
+                const hasPreviousLocation = !!(groupMembers && user && groupMembers[user.uid] && groupMembers[user.uid].lat && groupMembers[user.uid].lon);
+
+                if (!isGpsQuality && hasPreviousLocation) {
+                    // We already have a GPS-quality location for this user; ignore
+                    // new coarse updates to avoid jitter from WiFi/IP location.
+                    console.warn(`⚠️  Ignoring coarse location (source=${source}, accuracy=${accuracy}m). Keeping existing GPS location.`);
                     return;
                 }
 
