@@ -102,7 +102,6 @@ function App() {
         // If there is a pre-existing session (e.g. page reload), sign out to force username screen
         if (auth.currentUser) {
             auth.signOut().catch(e => console.warn('Initial signOut failed', e));
-            setUser(null);
             setUsername('');
         }
     }, []);
