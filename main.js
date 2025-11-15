@@ -313,6 +313,10 @@ function App() {
             alert('Enter your name first');
             return;
         }
+        if (!user || !user.uid) {
+            alert('You must be signed in to create a group. Please wait for authentication to complete.');
+            return;
+        }
         try {
             let codeInput = groupCode.trim().toUpperCase();
             const codePattern = /^[A-Z0-9]{4,8}$/; // allow 4-8 chars alphanumeric
