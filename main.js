@@ -50,6 +50,12 @@ function App() {
     const pinModeRef = useRef(false);
     const mapClickHandlerRef = useRef(null);
 
+    // Last-known local position (for debugging on phones)
+    const [lastPosition, setLastPosition] = useState(null); // { lat, lon }
+    const [lastAccuracy, setLastAccuracy] = useState(null);
+    const [lastSource, setLastSource] = useState(null);
+    const [lastLocationTimestamp, setLastLocationTimestamp] = useState(null);
+
     // Centralized map initialization to avoid race conditions
     const initMapIfNeeded = () => {
         if (!currentGroup) return;
@@ -366,6 +372,17 @@ function App() {
                 }
 
                 if (user && currentGroup) {
+                    // Update local debug state so phone users can see what the
+                    // app is receiving from the browser/device.
+                    try {
+                        setLastPosition({ lat: latitude, lon: longitude });
+                        setLastAccuracy(accuracy);
+                        setLastSource(source);
+                        setLastLocationTimestamp(Date.now());
+                    } catch (e) {
+                        // ignore during unmounted state
+                    }
+
                     database.ref(`groups/${currentGroup}/locations/${user.uid}`).set({
                         name: username,
                         sport: sport,
@@ -689,6 +706,15 @@ function App() {
                 <div className="header-info">
                     <h2>{currentGroupName ? `${currentGroupName} (${currentGroup})` : `Group: ${currentGroup}`}</h2>
                     <span className="user-badge">{username} ({sport})</span>
+                    <div className="location-status" style={{ fontSize: 12, marginTop: 6, color: '#d4cbc0' }}>
+                        {lastPosition ? (
+                            <span>
+                                Location: {lastPosition.lat.toFixed(5)}, {lastPosition.lon.toFixed(5)} • ±{lastAccuracy ? Math.round(lastAccuracy) + 'm' : '—'} • {lastSource || '—'}
+                            </span>
+                        ) : (
+                            <span>Location: no fix yet</span>
+                        )}
+                    </div>
                 </div>
                 <div style={{ display: 'flex', gap: 8 }}>
                     <button 
