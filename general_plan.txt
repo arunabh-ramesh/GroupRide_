@@ -1,0 +1,175 @@
+Yes. I can help you and your team shape this into something you can actually demo by the end of the hackathon.
+
+Below is a concrete plan you can follow.
+
+---
+
+## 1. Define a tight MVP (what you will demo)
+
+Minimum viable product:
+
+1. Users can:
+
+   * Join a “group” (ride / ski session) with friends.
+   * Share their live location on a specific mountain.
+   * See all group members as dots on a trail map in near real time.
+2. Basic safety:
+
+   * Show distance between you and a selected friend.
+   * Last-updated timestamp for each friend (so you know if someone dropped offline).
+
+If you have time later, add:
+
+* “Ping” feature (send a “regroup at X” marker).
+* Simple SOS button that broadcasts “I need help” plus location to the group.
+
+Keep the first demo goal: one phone moves around (or via simulator), everyone else sees the marker move on the map.
+
+---
+
+## 2. Core features broken down
+
+1. **Authentication / sessions**
+
+   * Simple: Sign in with Google/Email (Firebase Auth) or even just “enter a nickname + group code.”
+   * Groups/rooms: Users join a group via 4–6 letter code (e.g., “RIDE32”).
+
+2. **Location tracking**
+
+   * Phone periodically sends:
+
+     * `user_id`
+     * `lat`, `lon`
+     * `timestamp`
+     * `sport` (bike/ski)
+   * Update interval: e.g., every 2–5 seconds while app is active; slower in background.
+
+3. **Realtime map view**
+
+   * Map centered on the resort/mountain.
+   * Markers for each friend with name + time of last update.
+   * Tap a friend:
+
+     * Show distance and bearing (“420 m ahead, slightly left”).
+
+4. **Trail / mountain context**
+
+   * Base map: Mapbox / Google Maps.
+   * Optionally: overlay trail data (from Trailforks or OpenStreetMap) if you have time.
+
+---
+
+## 3. Suggested architecture (hackathon-friendly)
+
+Keep this as simple as possible:
+
+### Frontend (mobile)
+
+* **Option A (fastest cross-platform):** React Native or Expo.
+* **Option B:** Flutter.
+* Use a map SDK:
+
+  * React Native Maps + Google Maps, or
+  * Mapbox mobile SDK.
+
+Responsibilities:
+
+* Ask for location permission.
+* Start a location watcher.
+* Push coordinates to backend.
+* Subscribe to group location updates and render markers.
+
+### Backend
+
+To move quickly, you don’t need a full custom server:
+
+* **Use Firebase:**
+
+  * Auth: Firebase Authentication.
+  * Realtime database: Firestore or Realtime Database for live location.
+* Data model example:
+
+  ```text
+  groups/
+    <group_code>/
+      members/
+        <user_id>/
+          name: "Arunabh"
+          sport: "bike"
+      locations/
+        <user_id>/
+          lat: 42.12345
+          lon: -73.98765
+          updated_at: 1731678000  # Unix time
+  ```
+
+This gives instant sync to all devices with almost no backend code.
+
+---
+
+## 4. Handling mountain-specific constraints
+
+You don’t have to fully solve these, but you should show that you’ve thought about them:
+
+1. **Weak / no signal**
+
+   * Cache last known locations locally.
+   * If offline, show a warning: “Connection lost — showing last known positions.”
+
+2. **Battery life**
+
+   * Use medium-frequency updates (e.g., 3–5s) and lower GPS accuracy when possible.
+   * Stop updates when user leaves the group or closes tracking.
+
+3. **Privacy**
+
+   * Location only shared within a group while “session” is active.
+   * Simple toggle: “Stop sharing my location.”
+
+Mention these design choices in your pitch; judges care.
+
+---
+
+## 5. Concrete day-by-day build plan
+
+You can follow this sequence:
+
+1. **Skeleton + map**
+
+   * Create app.
+   * Show a map centered on a hardcoded resort/mountain.
+   * Add a fake marker to ensure map works.
+
+2. **Groups + basic UI**
+
+   * Simple screens:
+
+     * “Enter name”
+     * “Create group” / “Join group”
+   * Store group + user in Firebase.
+
+3. **Real-time locations**
+
+   * Implement location permission + background/foreground polling.
+   * Push updates to Firebase.
+   * Listen to `groups/<code>/locations` and update markers in real time.
+
+4. **Polish and demo flow**
+
+   * Friend list UI on side or bottom sheet with:
+
+     * Name, sport, last update time.
+   * Tap friend = zoom to their marker.
+   * Add one “extra” feature if time:
+
+     * Distance to friend, or
+     * SOS / ping marker.
+
+5. **Pitch**
+
+   * Story: “Keeping riders and skiers together and safe on the mountain.”
+   * Show live demo with two phones, one moving.
+
+---
+
+If you tell me what language/framework your team is most comfortable with, I can give you a more specific implementation outline (screens, data schema, and pseudo-code for the location sync).
