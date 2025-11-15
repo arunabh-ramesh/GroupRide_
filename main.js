@@ -339,7 +339,8 @@ function App() {
             console.log('[CreateGroup] Final code selected:', finalCode);
             setGroupCode(finalCode);
             setCurrentGroup(finalCode); // triggers map view render
-            const resolvedName = groupName.trim() ? groupName.trim() : finalCode;
+            const trimmedGroupName = groupName.trim();
+            const resolvedName = trimmedGroupName ? trimmedGroupName : finalCode;
             setCurrentGroupName(resolvedName);
             // Write meta name
             await database.ref(`groups/${finalCode}/meta`).set({
