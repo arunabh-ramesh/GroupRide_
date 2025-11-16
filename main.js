@@ -1428,8 +1428,10 @@ function App() {
                         onClick={() => setPinMode(!pinMode)} 
                         className={`btn btn-small ${pinMode ? 'btn-primary' : 'btn-secondary'}`}
                         style={{ background: pinMode ? '#e74c3c' : undefined }}
+                        title={pinMode ? 'Click map to place pin' : 'Add pin to map'}
                     >
-                        {pinMode ? '📍 Click Map to Place' : '📍 Add Pin'}
+                        <span className="mobile-hide">{pinMode ? '📍 Click Map' : '📍 Pin'}</span>
+                        <span className="mobile-show">📍</span>
                     </button>
                     {selectedTrail && (
                         <button 
@@ -1450,8 +1452,10 @@ function App() {
                             }}
                             className="btn btn-small"
                             style={{ background: '#2ecc71', color: 'white' }}
+                            title={`Pin trail: ${selectedTrail.name}`}
                         >
-                            📍 Pin: {selectedTrail.name.substring(0, 15)}{selectedTrail.name.length > 15 ? '...' : ''}
+                            <span className="mobile-hide">📍 {selectedTrail.name.substring(0, 10)}{selectedTrail.name.length > 10 ? '...' : ''}</span>
+                            <span className="mobile-show">📍🎿</span>
                         </button>
                     )}
                     <button 
@@ -1459,23 +1463,28 @@ function App() {
                         className={`btn btn-small ${showSkiTrails ? 'btn-primary' : 'btn-secondary'}`}
                         style={{ background: showSkiTrails ? '#0066ff' : undefined }}
                         disabled={trailsLoading}
+                        title="Toggle ski trail overlay"
                     >
-                        {showSkiTrails ? '⛷️ Ski Trails ON' : '⛷️ Ski Trails'}
+                        <span className="mobile-hide">{showSkiTrails ? '⛷️ ON' : '⛷️ Ski'}</span>
+                        <span className="mobile-show">⛷️</span>
                     </button>
                     <button 
                         onClick={toggleMtbTrails} 
                         className={`btn btn-small ${showMtbTrails ? 'btn-primary' : 'btn-secondary'}`}
                         style={{ background: showMtbTrails ? '#ff8800' : undefined }}
                         disabled={trailsLoading}
+                        title="Toggle MTB trail overlay"
                     >
-                        {showMtbTrails ? '🚴 MTB Trails ON' : '🚴 MTB Trails'}
+                        <span className="mobile-hide">{showMtbTrails ? '🚴 ON' : '🚴 MTB'}</span>
+                        <span className="mobile-show">🚴</span>
                     </button>
                     <button 
                         onClick={() => setShowSosConfirm(true)} 
                         className="btn btn-small"
                         style={{ background: '#ff0000', color: 'white', fontWeight: 'bold' }}
+                        title="Send emergency alert"
                     >
-                        🆘 SOS
+                        🆘
                     </button>
                     <button onClick={() => {
                             if (mapInstanceRef.current) {
@@ -1491,11 +1500,14 @@ function App() {
                             }
                         }}
                         className="btn btn-small"
+                        title="Center map on your location"
                     >
-                        📍 My Location
+                        <span className="mobile-hide">📍 Me</span>
+                        <span className="mobile-show">📍</span>
                     </button>
-                    <button onClick={handleLeaveGroup} className="btn btn-small">
-                        Leave
+                    <button onClick={handleLeaveGroup} className="btn btn-small" title="Leave group">
+                        <span className="mobile-hide">Leave</span>
+                        <span className="mobile-show">❌</span>
                     </button>
                 </div>
             </div>
