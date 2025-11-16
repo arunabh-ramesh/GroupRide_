@@ -1305,7 +1305,7 @@ function App() {
         return (
             <div className="container">
                 <div className="auth-container">
-                    <h1>Group Ride</h1>
+                    <h1>GroupRide</h1>
                     <p className="subtitle">Track your friends on the mountain</p>
                     
                     <div>
