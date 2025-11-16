@@ -47,12 +47,14 @@ function App() {
     const [pendingPinLocation, setPendingPinLocation] = useState(null); // { lat, lng }
     const [pinLabel, setPinLabel] = useState('');
     const [pinTime, setPinTime] = useState(''); // HH:MM format
+    const [trailsLoading, setTrailsLoading] = useState(false);
     const mapInstanceRef = useRef(null);
     const markersRef = useRef({});
     const pinMarkersRef = useRef({});
     const pinModeRef = useRef(false);
     const mapClickHandlerRef = useRef(null);
     const mapRef = useRef(null);
+    const trailLayersRef = useRef([]);
 
 
 
@@ -87,6 +89,173 @@ function App() {
         }
     };
 
+    // Fetch trails from OpenStreetMap Overpass API
+    const fetchAndDisplayTrails = async (map) => {
+        if (!map) return;
+        
+        // Clear old trails
+        trailLayersRef.current.forEach(layer => {
+            try {
+                map.removeLayer(layer);
+            } catch (e) {
+                // Layer might already be removed
+            }
+        });
+        trailLayersRef.current = [];
+        
+        setTrailsLoading(true);
+        
+        try {
+            console.log('[Trails] Fetching trail data...');
+            const bounds = map.getBounds();
+            const south = bounds.getSouth();
+            const west = bounds.getWest();
+            const north = bounds.getNorth();
+            const east = bounds.getEast();
+            
+            // Overpass query for ski pistes and MTB routes
+            const query = `
+                [out:json][timeout:60];
+                (
+                  way["piste:type"](${south},${west},${north},${east});
+                  way["route"="mtb"](${south},${west},${north},${east});
+                  way["highway"="path"]["mtb:scale"](${south},${west},${north},${east});
+                  way["highway"="track"]["mtb"="yes"](${south},${west},${north},${east});
+                );
+                out body;
+                >;
+                out skel qt;
+            `;
+            
+            console.log('[Trails] Query bounds:', { south, west, north, east });
+            
+            const response = await fetch('https://overpass-api.de/api/interpreter', {
+                method: 'POST',
+                body: query,
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                }
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            
+            const data = await response.json();
+            const elementCount = data.elements?.length || 0;
+            console.log('[Trails] Received', elementCount, 'elements');
+            
+            if (elementCount === 0) {
+                console.log('[Trails] No trails found in this area. Try zooming to a ski resort or MTB trail area.');
+                return;
+            }
+            
+            // Process nodes for coordinates
+            const nodes = {};
+            data.elements.forEach(el => {
+                if (el.type === 'node') {
+                    nodes[el.id] = [el.lat, el.lon];
+                }
+            });
+            
+            let trailsDrawn = 0;
+            
+            // Draw trails
+            data.elements.forEach(el => {
+                if (el.type === 'way' && el.nodes) {
+                    const coords = el.nodes
+                        .map(nodeId => nodes[nodeId])
+                        .filter(coord => coord);
+                    
+                    if (coords.length > 1) {
+                        const tags = el.tags || {};
+                        const isPiste = tags['piste:type'];
+                        const isMTB = tags['route'] === 'mtb' || tags['mtb:scale'] || tags['mtb'] === 'yes';
+                        
+                        // Determine color based on trail type
+                        let color = '#0088cc';
+                        let trailType = 'Trail';
+                        
+                        if (isPiste) {
+                            trailType = 'Ski Run';
+                            // Color by difficulty
+                            if (tags['piste:difficulty'] === 'novice') color = '#00ff00';
+                            else if (tags['piste:difficulty'] === 'easy') color = '#0000ff';
+                            else if (tags['piste:difficulty'] === 'intermediate') color = '#ff0000';
+                            else if (tags['piste:difficulty'] === 'advanced') color = '#000000';
+                            else color = '#0088cc';
+                        } else if (isMTB) {
+                            trailType = 'MTB Trail';
+                            color = '#ff8800';
+                        }
+                        
+                        const polyline = L.polyline(coords, {
+                            color: color,
+                            weight: 5,
+                            opacity: 0.8
+                        }).addTo(map);
+                        
+                        trailsDrawn++;
+                        
+                        // Create popup with trail info
+                        const name = tags.name || 'Unnamed Trail';
+                        const difficulty = tags['piste:difficulty'] || tags['mtb:scale'] || tags.difficulty || 'Unknown';
+                        const description = tags.description || '';
+                        
+                        let popupContent = `
+                            <div style="min-width: 200px;">
+                                <strong style="font-size: 16px; color: ${color};">${name}</strong><br>
+                                <em>${trailType}</em><br>
+                                <strong>Difficulty:</strong> ${difficulty}<br>
+                        `;
+                        
+                        if (description) {
+                            popupContent += `<strong>Info:</strong> ${description}<br>`;
+                        }
+                        
+                        if (tags['piste:grooming']) {
+                            popupContent += `<strong>Grooming:</strong> ${tags['piste:grooming']}<br>`;
+                        }
+                        
+                        if (tags.surface) {
+                            popupContent += `<strong>Surface:</strong> ${tags.surface}<br>`;
+                        }
+                        
+                        if (tags['piste:type']) {
+                            popupContent += `<strong>Type:</strong> ${tags['piste:type']}<br>`;
+                        }
+                        
+                        popupContent += `</div>`;
+                        
+                        polyline.bindPopup(popupContent);
+                        
+                        // Store trail layer for cleanup
+                        trailLayersRef.current.push(polyline);
+                        
+                        // Highlight on hover
+                        polyline.on('mouseover', function() {
+                            this.setStyle({ weight: 8, opacity: 1 });
+                        });
+                        polyline.on('mouseout', function() {
+                            this.setStyle({ weight: 5, opacity: 0.8 });
+                        });
+                    }
+                }
+            });
+            
+            console.log(`[Trails] Successfully drew ${trailsDrawn} trails on the map`);
+            
+            if (trailsDrawn === 0) {
+                console.log('[Trails] Warning: Found elements but could not draw any trails. Check data format.');
+            }
+        } catch (error) {
+            console.error('[Trails] Error fetching trail data:', error);
+            console.log('[Trails] Tip: The area might not have trail data, or the API request failed. Try zooming to a known ski resort.');
+        } finally {
+            setTrailsLoading(false);
+        }
+    };
+
     // Centralized map initialization to avoid race conditions
     const initMapIfNeeded = () => {
         if (!currentGroup) return;
@@ -95,10 +264,30 @@ function App() {
         try {
             console.log('[Map] Initializing map for group', currentGroup);
             const map = L.map(mapRef.current).setView([42.7285, -73.6852], 13);
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                attribution: '© OpenStreetMap contributors',
-                maxZoom: 18
+            
+            // Base layer - Outdoor/Topographic map
+            L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap contributors, SRTM | © OpenTopoMap',
+                maxZoom: 17
             }).addTo(map);
+            
+            // Layer control to toggle between base maps only
+            const baseLayers = {
+                'Topographic': L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+                    attribution: '© OpenStreetMap contributors, SRTM | © OpenTopoMap',
+                    maxZoom: 17
+                }).addTo(map),
+                'Standard': L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '© OpenStreetMap contributors',
+                    maxZoom: 18
+                })
+            };
+            
+            L.control.layers(baseLayers, {}).addTo(map);
+            
+            // Fetch and display trails from OpenStreetMap
+            fetchAndDisplayTrails(map);
+            
             mapInstanceRef.current = map;
             // Multiple delayed invalidations to handle flex layout settling
             [50, 250, 1000].forEach(delay => {
@@ -687,31 +876,36 @@ function App() {
                     <h1>🏔️ Group Tracker</h1>
                     <p className="subtitle">Track your friends on the mountain</p>
                     
-                    <div className="form-group">
-                        <input
-                            type="text"
-                            placeholder="Your Name"
-                            value={username}
-                            onChange={(e) => setUsername(e.target.value)}
-                            className="input"
-                        />
-                    </div>
-                    
-                    <div className="form-group">
-                        <label>Sport:</label>
-                        <select 
-                            value={sport} 
-                            onChange={(e) => setSport(e.target.value)}
-                            className="input"
-                        >
-                            <option value="ski">⛷️ Skiing</option>
-                            <option value="bike">🚴 Biking</option>
-                        </select>
-                    </div>
-                    
-                    <button onClick={handleSignIn} className="btn btn-primary">
-                        Get Started
-                    </button>
+                    <form onSubmit={(e) => {
+                        e.preventDefault();
+                        handleSignIn();
+                    }}>
+                        <div className="form-group">
+                            <input
+                                type="text"
+                                placeholder="Your Name"
+                                value={username}
+                                onChange={(e) => setUsername(e.target.value)}
+                                className="input"
+                            />
+                        </div>
+                        
+                        <div className="form-group">
+                            <label>Sport:</label>
+                            <select 
+                                value={sport} 
+                                onChange={(e) => setSport(e.target.value)}
+                                className="input"
+                            >
+                                <option value="ski">⛷️ Skiing</option>
+                                <option value="bike">🚴 Biking</option>
+                            </select>
+                        </div>
+                        
+                        <button type="submit" className="btn btn-primary">
+                            Get Started
+                        </button>
+                    </form>
                 </div>
             </div>
         );
@@ -779,6 +973,17 @@ function App() {
                         style={{ background: pinMode ? '#e74c3c' : undefined }}
                     >
                         {pinMode ? '📍 Click Map to Place' : '📍 Add Pin'}
+                    </button>
+                    <button 
+                        onClick={() => {
+                            if (mapInstanceRef.current) {
+                                fetchAndDisplayTrails(mapInstanceRef.current);
+                            }
+                        }} 
+                        className="btn btn-small btn-secondary"
+                        disabled={trailsLoading}
+                    >
+                        {trailsLoading ? '🔄 Loading...' : '🗺️ Reload Trails'}
                     </button>
                     <button onClick={handleLeaveGroup} className="btn btn-small">
                         Leave
