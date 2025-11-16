@@ -1069,7 +1069,7 @@ function App() {
         return (
             <div className="container">
                 <div className="auth-container">
-                    <h1>🏔️ Group Tracker</h1>
+                    <h1>Group Ride</h1>
                     <p className="subtitle">Track your friends on the mountain</p>
                     
                     <div>
@@ -1149,7 +1149,7 @@ function App() {
                             className="input"
                             maxLength="8"
                         />
-                        <small className="hint">Enter a custom code or leave blank to auto-generate.</small>
+                        <small className="hint">Enter a custom code.</small>
                     </div>
 
                     <div className="form-group">
@@ -1167,7 +1167,7 @@ function App() {
                     <button onClick={handleJoinGroup} className="btn btn-primary">
                         Join Group
                     </button>
-                    <button onClick={handleCreateGroup} className="btn btn-secondary">
+                    <button onClick={handleCreateGroup} className="btn btn-primary">
                         Create Group
                     </button>
                     
