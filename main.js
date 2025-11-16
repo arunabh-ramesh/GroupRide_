@@ -47,14 +47,18 @@ function App() {
     const [pendingPinLocation, setPendingPinLocation] = useState(null); // { lat, lng }
     const [pinLabel, setPinLabel] = useState('');
     const [pinTime, setPinTime] = useState(''); // HH:MM format
+    const [selectedTrail, setSelectedTrail] = useState(null); // Store selected trail info
     const [trailsLoading, setTrailsLoading] = useState(false);
+    const [showSkiTrails, setShowSkiTrails] = useState(false);
+    const [showMtbTrails, setShowMtbTrails] = useState(false);
     const mapInstanceRef = useRef(null);
     const markersRef = useRef({});
     const pinMarkersRef = useRef({});
     const pinModeRef = useRef(false);
     const mapClickHandlerRef = useRef(null);
     const mapRef = useRef(null);
-    const trailLayersRef = useRef([]);
+    const skiTrailLayersRef = useRef([]);
+    const mtbTrailLayersRef = useRef([]);
 
 
 
@@ -90,42 +94,65 @@ function App() {
     };
 
     // Fetch trails from OpenStreetMap Overpass API
-    const fetchAndDisplayTrails = async (map) => {
-        if (!map) return;
+    const fetchAndDisplayTrails = async (map, trailType) => {
+        if (!map || !trailType) return;
         
-        // Clear old trails
-        trailLayersRef.current.forEach(layer => {
+        console.log(`[Trails] Fetching ${trailType} trails...`);
+        
+        // Determine which layers to clear and use
+        const layersRef = trailType === 'ski' ? skiTrailLayersRef : mtbTrailLayersRef;
+        
+        // Clear old trails of this type
+        layersRef.current.forEach(layer => {
             try {
                 map.removeLayer(layer);
             } catch (e) {
                 // Layer might already be removed
             }
         });
-        trailLayersRef.current = [];
+        layersRef.current = [];
         
         setTrailsLoading(true);
         
         try {
-            console.log('[Trails] Fetching trail data...');
             const bounds = map.getBounds();
             const south = bounds.getSouth();
             const west = bounds.getWest();
             const north = bounds.getNorth();
             const east = bounds.getEast();
             
-            // Overpass query for ski pistes and MTB routes
-            const query = `
-                [out:json][timeout:60];
-                (
-                  way["piste:type"](${south},${west},${north},${east});
-                  way["route"="mtb"](${south},${west},${north},${east});
-                  way["highway"="path"]["mtb:scale"](${south},${west},${north},${east});
-                  way["highway"="track"]["mtb"="yes"](${south},${west},${north},${east});
-                );
-                out body;
-                >;
-                out skel qt;
-            `;
+            let query;
+            
+            if (trailType === 'ski') {
+                // Query ONLY for ski pistes
+                query = `
+                    [out:json][timeout:60];
+                    (
+                      way["piste:type"]["piste:type"!="connection"](${south},${west},${north},${east});
+                      relation["piste:type"]["piste:type"!="connection"](${south},${west},${north},${east});
+                    );
+                    out body;
+                    >;
+                    out skel qt;
+                `;
+            } else if (trailType === 'mtb') {
+                // Query ONLY for MTB trails
+                query = `
+                    [out:json][timeout:60];
+                    (
+                      way["route"="mtb"](${south},${west},${north},${east});
+                      way["mtb:scale"](${south},${west},${north},${east});
+                      relation["route"="mtb"](${south},${west},${north},${east});
+                    );
+                    out body;
+                    >;
+                    out skel qt;
+                `;
+            } else {
+                console.error('[Trails] Invalid trail type:', trailType);
+                setTrailsLoading(false);
+                return;
+            }
             
             console.log('[Trails] Query bounds:', { south, west, north, east });
             
@@ -143,10 +170,11 @@ function App() {
             
             const data = await response.json();
             const elementCount = data.elements?.length || 0;
-            console.log('[Trails] Received', elementCount, 'elements');
+            console.log(`[Trails] Received ${elementCount} elements for ${trailType}`);
             
             if (elementCount === 0) {
-                console.log('[Trails] No trails found in this area. Try zooming to a ski resort or MTB trail area.');
+                console.log(`[Trails] No ${trailType} trails found in this area.`);
+                setTrailsLoading(false);
                 return;
             }
             
@@ -158,54 +186,113 @@ function App() {
                 }
             });
             
+            // Process relation members
+            const wayMembers = {};
+            data.elements.forEach(el => {
+                if (el.type === 'relation' && el.members) {
+                    el.members.forEach(member => {
+                        if (member.type === 'way') {
+                            wayMembers[member.ref] = el.tags || {};
+                        }
+                    });
+                }
+            });
+            
             let trailsDrawn = 0;
+            const drawnWays = new Set(); // Prevent duplicates
             
             // Draw trails
             data.elements.forEach(el => {
-                if (el.type === 'way' && el.nodes) {
+                if (el.type === 'way' && el.nodes && !drawnWays.has(el.id)) {
                     const coords = el.nodes
                         .map(nodeId => nodes[nodeId])
                         .filter(coord => coord);
                     
                     if (coords.length > 1) {
-                        const tags = el.tags || {};
-                        const isPiste = tags['piste:type'];
-                        const isMTB = tags['route'] === 'mtb' || tags['mtb:scale'] || tags['mtb'] === 'yes';
+                        const tags = el.tags || wayMembers[el.id] || {};
                         
-                        // Determine color based on trail type
                         let color = '#0088cc';
-                        let trailType = 'Trail';
+                        let trailTypeName = 'Trail';
+                        let width = 4;
+                        let isValid = false;
                         
-                        if (isPiste) {
-                            trailType = 'Ski Run';
-                            // Color by difficulty
-                            if (tags['piste:difficulty'] === 'novice') color = '#00ff00';
-                            else if (tags['piste:difficulty'] === 'easy') color = '#0000ff';
-                            else if (tags['piste:difficulty'] === 'intermediate') color = '#ff0000';
-                            else if (tags['piste:difficulty'] === 'advanced') color = '#000000';
-                            else color = '#0088cc';
-                        } else if (isMTB) {
-                            trailType = 'MTB Trail';
-                            color = '#ff8800';
+                        if (trailType === 'ski') {
+                            // SKI TRAIL
+                            const pisteType = tags['piste:type'];
+                            if (!pisteType || pisteType === 'connection' || pisteType === 'skitour') {
+                                return; // Skip invalid ski trails
+                            }
+                            
+                            isValid = true;
+                            trailTypeName = pisteType === 'downhill' ? 'Ski Run' : 
+                                           pisteType === 'nordic' ? 'Nordic Trail' : 
+                                           'Ski Trail';
+                            
+                            // Color by difficulty (international standard)
+                            const difficulty = tags['piste:difficulty'];
+                            if (difficulty === 'novice') {
+                                color = '#00ff00'; // Green
+                            } else if (difficulty === 'easy') {
+                                color = '#0066ff'; // Blue
+                            } else if (difficulty === 'intermediate') {
+                                color = '#ff0000'; // Red
+                            } else if (difficulty === 'advanced' || difficulty === 'expert') {
+                                color = '#000000'; // Black
+                            } else if (difficulty === 'freeride' || difficulty === 'extreme') {
+                                color = '#ff6600'; // Orange/yellow for extreme
+                            } else {
+                                color = '#0088cc'; // Default blue
+                            }
+                            width = 5;
+                        } else if (trailType === 'mtb') {
+                            // MTB TRAIL
+                            const isMTB = tags['route'] === 'mtb' || tags['mtb:scale'];
+                            if (!isMTB) {
+                                return; // Skip if not MTB trail
+                            }
+                            
+                            isValid = true;
+                            trailTypeName = 'MTB Trail';
+                            const mtbScale = tags['mtb:scale'];
+                            
+                            // Color by MTB difficulty scale (0-6+)
+                            if (mtbScale === '0' || mtbScale === '0+') {
+                                color = '#00ff00'; // Green - easy
+                            } else if (mtbScale === '1' || mtbScale === '1+') {
+                                color = '#0066ff'; // Blue - moderate
+                            } else if (mtbScale === '2' || mtbScale === '2+') {
+                                color = '#ff8800'; // Orange - difficult
+                            } else if (mtbScale === '3' || mtbScale === '3+') {
+                                color = '#ff0000'; // Red - very difficult
+                            } else if (mtbScale === '4' || mtbScale === '4+' || mtbScale === '5' || mtbScale === '6') {
+                                color = '#000000'; // Black - extremely difficult
+                            } else {
+                                color = '#ff8800'; // Default orange for MTB
+                            }
+                            width = 4;
                         }
+                        
+                        if (!isValid) return;
                         
                         const polyline = L.polyline(coords, {
                             color: color,
-                            weight: 5,
-                            opacity: 0.8
+                            weight: width,
+                            opacity: 0.8,
+                            smoothFactor: 1
                         }).addTo(map);
                         
+                        drawnWays.add(el.id);
                         trailsDrawn++;
                         
                         // Create popup with trail info
-                        const name = tags.name || 'Unnamed Trail';
-                        const difficulty = tags['piste:difficulty'] || tags['mtb:scale'] || tags.difficulty || 'Unknown';
+                        const name = tags.name || tags.ref || 'Unnamed Trail';
+                        const difficulty = tags['piste:difficulty'] || tags['mtb:scale'] || 'Unknown';
                         const description = tags.description || '';
                         
                         let popupContent = `
                             <div style="min-width: 200px;">
                                 <strong style="font-size: 16px; color: ${color};">${name}</strong><br>
-                                <em>${trailType}</em><br>
+                                <em>${trailTypeName}</em><br>
                                 <strong>Difficulty:</strong> ${difficulty}<br>
                         `;
                         
@@ -221,36 +308,54 @@ function App() {
                             popupContent += `<strong>Surface:</strong> ${tags.surface}<br>`;
                         }
                         
-                        if (tags['piste:type']) {
-                            popupContent += `<strong>Type:</strong> ${tags['piste:type']}<br>`;
+                        if (tags.ref) {
+                            popupContent += `<strong>Ref:</strong> ${tags.ref}<br>`;
+                        }
+                        
+                        if (tags['mtb:scale:uphill']) {
+                            popupContent += `<strong>Uphill Scale:</strong> ${tags['mtb:scale:uphill']}<br>`;
                         }
                         
                         popupContent += `</div>`;
                         
                         polyline.bindPopup(popupContent);
                         
+                        // Store trail info when clicked
+                        const trailInfo = {
+                            name: name,
+                            type: trailTypeName,
+                            difficulty: difficulty,
+                            color: color,
+                            description: description,
+                            location: coords[Math.floor(coords.length / 2)] // Middle point of trail
+                        };
+                        
+                        polyline.on('click', function(e) {
+                            console.log('[Trail] Trail clicked:', trailInfo.name);
+                            setSelectedTrail(trailInfo);
+                        });
+                        
                         // Store trail layer for cleanup
-                        trailLayersRef.current.push(polyline);
+                        layersRef.current.push(polyline);
                         
                         // Highlight on hover
                         polyline.on('mouseover', function() {
-                            this.setStyle({ weight: 8, opacity: 1 });
+                            this.setStyle({ weight: width + 3, opacity: 1 });
                         });
                         polyline.on('mouseout', function() {
-                            this.setStyle({ weight: 5, opacity: 0.8 });
+                            this.setStyle({ weight: width, opacity: 0.8 });
                         });
                     }
                 }
             });
             
-            console.log(`[Trails] Successfully drew ${trailsDrawn} trails on the map`);
+            console.log(`[Trails] Successfully drew ${trailsDrawn} ${trailType} trails on the map`);
             
             if (trailsDrawn === 0) {
-                console.log('[Trails] Warning: Found elements but could not draw any trails. Check data format.');
+                console.log(`[Trails] Warning: Found elements but no valid ${trailType} trails to display.`);
             }
         } catch (error) {
-            console.error('[Trails] Error fetching trail data:', error);
-            console.log('[Trails] Tip: The area might not have trail data, or the API request failed. Try zooming to a known ski resort.');
+            console.error(`[Trails] Error fetching ${trailType} trail data:`, error);
         } finally {
             setTrailsLoading(false);
         }
@@ -285,8 +390,7 @@ function App() {
             
             L.control.layers(baseLayers, {}).addTo(map);
             
-            // Fetch and display trails from OpenStreetMap
-            fetchAndDisplayTrails(map);
+            // Don't auto-load trails - let user toggle them with buttons
             
             mapInstanceRef.current = map;
             // Multiple delayed invalidations to handle flex layout settling
@@ -335,19 +439,31 @@ function App() {
     // Authentication state listener
     useEffect(() => {
         const unsubscribe = auth.onAuthStateChanged((user) => {
-            setUser(user);
+            console.log('[Auth] State changed. User:', !!user, 'Username:', username);
+            // Only set user if we have a username (user clicked sign in)
+            if (user && !username.trim()) {
+                console.log('[Auth] User exists but no username - signing out');
+                auth.signOut();
+                setUser(null);
+            } else {
+                setUser(user);
+            }
             setAuthInitializing(false);
         });
         return () => unsubscribe();
-    }, []);
+    }, [username]);
 
     // Always start at username entry: sign out any persisted anonymous session
     useEffect(() => {
+        console.log('[Init] Initial mount - checking for existing session');
         // If there is a pre-existing session (e.g. page reload), sign out to force username screen
         if (auth.currentUser) {
-            auth.signOut().catch(e => console.warn('Initial signOut failed', e));
-            setUser(null);
-            setUsername('');
+            console.log('[Init] Found existing session - signing out');
+            auth.signOut().then(() => {
+                console.log('[Init] Successfully signed out');
+                setUser(null);
+                setUsername('');
+            }).catch(e => console.warn('[Init] Sign out failed', e));
         }
     }, []);
 
@@ -529,14 +645,32 @@ function App() {
                         const marker = L.marker([data.lat, data.lon], { icon: pinIcon })
                             .addTo(mapInstanceRef.current);
                         
-                        marker.bindPopup(`
-                            <strong>${data.label}</strong><br>
-                            Time: ${data.pinTime || 'N/A'}<br>
-                            By: ${data.createdBy}<br>
-                            Created: ${new Date(data.createdAt).toLocaleString()}<br>
-                            Expires: ${new Date(data.expiresAt).toLocaleString()}<br>
-                            <button onclick="if(confirm('Delete this pin?')) { firebase.database().ref('groups/${currentGroup}/pins/${pinId}').remove(); }" style="margin-top:8px;padding:4px 8px;background:#e74c3c;color:white;border:none;border-radius:4px;cursor:pointer;">Delete Pin</button>
-                        `);
+                        let popupContent = `
+                            <div style="min-width: 200px;">
+                                <strong style="font-size: 16px;">${data.label}</strong><br>
+                        `;
+                        
+                        // Add trail information if this is a trail pin
+                        if (data.trail) {
+                            popupContent += `
+                                <div style="background: #f0f0f0; padding: 8px; border-radius: 6px; margin: 8px 0; border-left: 4px solid ${data.trail.color};">
+                                    <strong style="color: ${data.trail.color};">🎿 ${data.trail.type}</strong><br>
+                                    <em>Trail: ${data.trail.name}</em><br>
+                                    <strong>Difficulty:</strong> ${data.trail.difficulty}
+                                </div>
+                            `;
+                        }
+                        
+                        popupContent += `
+                                <strong>Time:</strong> ${data.pinTime || 'N/A'}<br>
+                                <strong>By:</strong> ${data.createdBy}<br>
+                                <strong>Created:</strong> ${new Date(data.createdAt).toLocaleTimeString()}<br>
+                                <strong>Expires:</strong> ${new Date(data.expiresAt).toLocaleTimeString()}<br>
+                                <button onclick="if(confirm('Delete this pin?')) { firebase.database().ref('groups/${currentGroup}/pins/${pinId}').remove(); }" style="margin-top:8px;padding:4px 8px;background:#e74c3c;color:white;border:none;border-radius:4px;cursor:pointer;">Delete Pin</button>
+                            </div>
+                        `;
+                        
+                        marker.bindPopup(popupContent);
                         
                         pinMarkersRef.current[pinId] = marker;
                     }
@@ -718,21 +852,33 @@ function App() {
 
     // Anonymous sign in
     const handleSignIn = async () => {
-        if (!username.trim()) {
-            alert('Please enter your name');
+        console.log('[Sign In] Attempting sign in. Username:', username, 'Length:', username.trim().length);
+        
+        // Strict validation
+        if (!username.trim() || username.trim().length < 2) {
+            console.log('[Sign In] Rejected - username too short');
+            alert('Please enter a name with at least 2 characters');
             return;
         }
         
-        if (signingIn) return; // Prevent duplicate sign-in attempts
+        if (signingIn) {
+            console.log('[Sign In] Already signing in, blocking duplicate attempt');
+            return;
+        }
+        
         setSigningIn(true);
+        console.log('[Sign In] Starting authentication...');
         
         try {
             // Only sign in if not already signed in
             if (!auth.currentUser) {
                 await auth.signInAnonymously();
+                console.log('[Sign In] ✅ Successfully authenticated');
+            } else {
+                console.log('[Sign In] User already authenticated');
             }
         } catch (error) {
-            console.error('Error signing in:', error);
+            console.error('[Sign In] ❌ Error signing in:', error);
             alert('Error signing in: ' + error.message);
             setSigningIn(false);
         }
@@ -806,6 +952,54 @@ function App() {
         setUsername('');
     };
 
+    // Toggle ski trails
+    const toggleSkiTrails = () => {
+        if (!mapInstanceRef.current) return;
+        
+        if (showSkiTrails) {
+            // Hide ski trails
+            console.log('[Trails] Hiding ski trails');
+            skiTrailLayersRef.current.forEach(layer => {
+                try {
+                    mapInstanceRef.current.removeLayer(layer);
+                } catch (e) {
+                    console.warn('Error removing ski trail layer:', e);
+                }
+            });
+            skiTrailLayersRef.current = [];
+            setShowSkiTrails(false);
+        } else {
+            // Show ski trails
+            console.log('[Trails] Showing ski trails');
+            setShowSkiTrails(true);
+            fetchAndDisplayTrails(mapInstanceRef.current, 'ski');
+        }
+    };
+
+    // Toggle MTB trails
+    const toggleMtbTrails = () => {
+        if (!mapInstanceRef.current) return;
+        
+        if (showMtbTrails) {
+            // Hide MTB trails
+            console.log('[Trails] Hiding MTB trails');
+            mtbTrailLayersRef.current.forEach(layer => {
+                try {
+                    mapInstanceRef.current.removeLayer(layer);
+                } catch (e) {
+                    console.warn('Error removing MTB trail layer:', e);
+                }
+            });
+            mtbTrailLayersRef.current = [];
+            setShowMtbTrails(false);
+        } else {
+            // Show MTB trails
+            console.log('[Trails] Showing MTB trails');
+            setShowMtbTrails(true);
+            fetchAndDisplayTrails(mapInstanceRef.current, 'mtb');
+        }
+    };
+
     // Create new group with generated code
     const handleCreateGroup = async () => {
         if (!username.trim()) {
@@ -868,25 +1062,41 @@ function App() {
         }
     };
 
-    // Render username/login screen (force if username not set)
-    if (!username.trim()) {
+    // Render username/login screen (force if username not set OR user not authenticated)
+    if (!username.trim() || !user) {
+        const isUsernameValid = username.trim().length >= 2;
+        
+        console.log('[Render] Login screen - Username:', username, 'Valid:', isUsernameValid, 'User:', !!user);
+        
         return (
             <div className="container">
                 <div className="auth-container">
                     <h1>🏔️ Group Tracker</h1>
                     <p className="subtitle">Track your friends on the mountain</p>
                     
-                    <form onSubmit={(e) => {
-                        e.preventDefault();
-                        handleSignIn();
-                    }}>
+                    <div>
                         <div className="form-group">
                             <input
                                 type="text"
-                                placeholder="Your Name"
+                                placeholder="Your Name (min 2 characters)"
                                 value={username}
-                                onChange={(e) => setUsername(e.target.value)}
+                                onChange={(e) => {
+                                    const newValue = e.target.value;
+                                    console.log('[Input] Username changed to:', newValue, 'Length:', newValue.trim().length);
+                                    setUsername(newValue);
+                                }}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        console.log('[Input] Enter key blocked');
+                                    }
+                                }}
                                 className="input"
+                                autoComplete="off"
+                                autoCorrect="off"
+                                autoCapitalize="off"
+                                spellCheck="false"
                             />
                         </div>
                         
@@ -902,10 +1112,23 @@ function App() {
                             </select>
                         </div>
                         
-                        <button type="submit" className="btn btn-primary">
+                        <button 
+                            type="button"
+                            onClick={() => {
+                                console.log('[Button] Clicked. Valid:', isUsernameValid);
+                                if (isUsernameValid && username.trim().length >= 2) {
+                                    handleSignIn();
+                                } else {
+                                    console.log('[Button] Blocked - username not valid');
+                                }
+                            }}
+                            className="btn btn-primary"
+                            disabled={!isUsernameValid}
+                            style={{ opacity: isUsernameValid ? 1 : 0.5, cursor: isUsernameValid ? 'pointer' : 'not-allowed' }}
+                        >
                             Get Started
                         </button>
-                    </form>
+                    </div>
                 </div>
             </div>
         );
@@ -966,7 +1189,7 @@ function App() {
                     <h2>{currentGroupName ? `${currentGroupName} (${currentGroup})` : `Group: ${currentGroup}`}</h2>
                     <span className="user-badge">{username} ({sport})</span>
                 </div>
-                <div style={{ display: 'flex', gap: 8 }}>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                     <button 
                         onClick={() => setPinMode(!pinMode)} 
                         className={`btn btn-small ${pinMode ? 'btn-primary' : 'btn-secondary'}`}
@@ -974,16 +1197,39 @@ function App() {
                     >
                         {pinMode ? '📍 Click Map to Place' : '📍 Add Pin'}
                     </button>
+                    {selectedTrail && (
+                        <button 
+                            onClick={() => {
+                                // Create pin at selected trail location
+                                console.log('[Pin] Creating pin for trail:', selectedTrail.name);
+                                setPendingPinLocation({ 
+                                    lat: selectedTrail.location[0], 
+                                    lng: selectedTrail.location[1] 
+                                });
+                                setPinLabel(selectedTrail.name);
+                                setShowPinModal(true);
+                            }}
+                            className="btn btn-small"
+                            style={{ background: '#2ecc71', color: 'white' }}
+                        >
+                            📍 Pin: {selectedTrail.name.substring(0, 15)}{selectedTrail.name.length > 15 ? '...' : ''}
+                        </button>
+                    )}
                     <button 
-                        onClick={() => {
-                            if (mapInstanceRef.current) {
-                                fetchAndDisplayTrails(mapInstanceRef.current);
-                            }
-                        }} 
-                        className="btn btn-small btn-secondary"
+                        onClick={toggleSkiTrails} 
+                        className={`btn btn-small ${showSkiTrails ? 'btn-primary' : 'btn-secondary'}`}
+                        style={{ background: showSkiTrails ? '#0066ff' : undefined }}
                         disabled={trailsLoading}
                     >
-                        {trailsLoading ? '🔄 Loading...' : '🗺️ Reload Trails'}
+                        {showSkiTrails ? '⛷️ Ski Trails ON' : '⛷️ Ski Trails'}
+                    </button>
+                    <button 
+                        onClick={toggleMtbTrails} 
+                        className={`btn btn-small ${showMtbTrails ? 'btn-primary' : 'btn-secondary'}`}
+                        style={{ background: showMtbTrails ? '#ff8800' : undefined }}
+                        disabled={trailsLoading}
+                    >
+                        {showMtbTrails ? '🚴 MTB Trails ON' : '🚴 MTB Trails'}
                     </button>
                     <button onClick={handleLeaveGroup} className="btn btn-small">
                         Leave
@@ -1125,7 +1371,24 @@ function App() {
                         boxShadow: '0 10px 30px rgba(0,0,0,0.2)',
                         border: '4px solid #2d1b3d'
                     }}>
-                        <h3 style={{ marginBottom: 16, color: '#2d1b3d' }}>📍 Name Your Pin</h3>
+                        <h3 style={{ marginBottom: 16, color: '#2d1b3d' }}>
+                            📍 {selectedTrail ? `Pin Trail: ${selectedTrail.name}` : 'Name Your Pin'}
+                        </h3>
+                        {selectedTrail && (
+                            <div style={{
+                                background: '#f0f0f0',
+                                padding: 10,
+                                borderRadius: 8,
+                                marginBottom: 12,
+                                border: `2px solid ${selectedTrail.color}`
+                            }}>
+                                <div style={{ fontSize: '14px', color: '#333' }}>
+                                    <strong style={{ color: selectedTrail.color }}>{selectedTrail.type}</strong><br/>
+                                    Difficulty: {selectedTrail.difficulty}<br/>
+                                    {selectedTrail.description && `Info: ${selectedTrail.description}`}
+                                </div>
+                            </div>
+                        )}
                         <div className="form-group">
                             <input
                                 type="text"
@@ -1152,6 +1415,7 @@ function App() {
                                 onClick={() => {
                                     setShowPinModal(false);
                                     setPinLabel('');
+                                    setSelectedTrail(null);
                                 }}
                                 style={{ width: 'auto', marginBottom: 0 }}
                             >
@@ -1164,7 +1428,8 @@ function App() {
                                         const pinId = Date.now().toString();
                                         const now = Date.now();
                                         const fiveMinutes = 5 * 60 * 1000; // 5 minutes in milliseconds
-                                        database.ref(`groups/${currentGroup}/pins/${pinId}`).set({
+                                        
+                                        const pinData = {
                                             lat: pendingPinLocation.lat,
                                             lon: pendingPinLocation.lng,
                                             label: pinLabel.trim(),
@@ -1172,11 +1437,26 @@ function App() {
                                             createdBy: username,
                                             createdAt: now,
                                             expiresAt: now + fiveMinutes
-                                        });
+                                        };
+                                        
+                                        // Add trail info if this is a trail pin
+                                        if (selectedTrail) {
+                                            pinData.trail = {
+                                                name: selectedTrail.name,
+                                                type: selectedTrail.type,
+                                                difficulty: selectedTrail.difficulty,
+                                                color: selectedTrail.color
+                                            };
+                                        }
+                                        
+                                        database.ref(`groups/${currentGroup}/pins/${pinId}`).set(pinData);
                                         setShowPinModal(false);
                                         setPinLabel('');
                                         setPinTime('');
                                         setPinMode(false);
+                                        setSelectedTrail(null);
+                                        
+                                        console.log('[Pin] Created pin:', pinData);
                                     }
                                 }}
                                 style={{ width: 'auto', marginBottom: 0 }}
