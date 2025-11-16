@@ -66,6 +66,9 @@ function App() {
     const trailLayersMapRef = useRef({});
     const pinnedTrailIdRef = useRef(null);
     const highlightedTrailIdsRef = useRef(new Set()); // Persistent across trail toggle
+    const lastSkiBoundsRef = useRef(null); // Track last fetched ski trail bounds
+    const lastMtbBoundsRef = useRef(null); // Track last fetched MTB trail bounds
+    const trailFetchTimeoutRef = useRef(null); // Debounce timeout
     // Auto-center control: when user moves the map, stop auto-centering on location updates
     const autoCenterRef = useRef(true);
     // Store last known own location so the "return to me" button can use it
@@ -74,6 +77,14 @@ function App() {
     const startPositionRef = useRef([42.7285, -73.6852]);
 
 
+
+    // Helper to check if bounds have changed enough to warrant a refetch
+    const boundsSigChange = (oldBounds, newBounds) => {
+        if (!oldBounds) return true;
+        const deltaLat = Math.abs(oldBounds.south - newBounds.south) + Math.abs(oldBounds.north - newBounds.north);
+        const deltaLng = Math.abs(oldBounds.west - newBounds.west) + Math.abs(oldBounds.east - newBounds.east);
+        return deltaLat > 0.05 || deltaLng > 0.05; // Only refetch if bounds changed significantly
+    };
 
     // Helper to get a stable uid (may come from auth.currentUser during async sign-in)
     const getUid = () => {
@@ -107,33 +118,42 @@ function App() {
     };
 
     // Fetch trails from OpenStreetMap Overpass API
-    const fetchAndDisplayTrails = async (map, trailType) => {
+    const fetchAndDisplayTrails = async (map, trailType, forceRefetch = false) => {
         if (!map || !trailType) return;
         
         console.log(`[Trails] Fetching ${trailType} trails...`);
         
-        // Determine which layers to clear and use
-        const layersRef = trailType === 'ski' ? skiTrailLayersRef : mtbTrailLayersRef;
+        // Get current bounds
+        const bounds = map.getBounds();
+        const boundsObj = {
+            south: bounds.getSouth(),
+            west: bounds.getWest(),
+            north: bounds.getNorth(),
+            east: bounds.getEast()
+        };
         
-        // Clear old trails of this type and remove mapping entries
-        layersRef.current.forEach(layer => {
-            try {
-                if (layer && layer.trailId) delete trailLayersMapRef.current[layer.trailId];
-                map.removeLayer(layer);
-            } catch (e) {
-                // Layer might already be removed
+        // Check if bounds have changed enough to refetch (skip if forceRefetch is true)
+        if (!forceRefetch) {
+            const lastBounds = trailType === 'ski' ? lastSkiBoundsRef.current : lastMtbBoundsRef.current;
+            if (!boundsSigChange(lastBounds, boundsObj)) {
+                console.log(`[Trails] ${trailType} bounds haven't changed much, skipping refetch`);
+                return;
             }
-        });
-        layersRef.current = [];
+        }
+        
+        // Store current bounds
+        if (trailType === 'ski') {
+            lastSkiBoundsRef.current = boundsObj;
+        } else {
+            lastMtbBoundsRef.current = boundsObj;
+        }
+        
+        const layersRef = trailType === 'ski' ? skiTrailLayersRef : mtbTrailLayersRef;
         
         setTrailsLoading(true);
         
         try {
-            const bounds = map.getBounds();
-            const south = bounds.getSouth();
-            const west = bounds.getWest();
-            const north = bounds.getNorth();
-            const east = bounds.getEast();
+            const { south, west, north, east } = boundsObj;
             
             let query;
             
@@ -503,6 +523,43 @@ function App() {
             }
         }
     }, [sport, currentGroup]);
+
+    // Auto-fetch trails when user pans or zooms (if trails are enabled)
+    useEffect(() => {
+        if (!mapInstanceRef.current) return;
+        if (!showSkiTrails && !showMtbTrails) return; // No trails enabled
+
+        // Debounce trail fetching to avoid too many requests during rapid zoom/pan
+        const handleMapChange = () => {
+            clearTimeout(trailFetchTimeoutRef.current);
+            trailFetchTimeoutRef.current = setTimeout(() => {
+                if (mapInstanceRef.current) {
+                    if (showSkiTrails) {
+                        console.log('[Trails] Auto-fetching ski trails after map change');
+                        fetchAndDisplayTrails(mapInstanceRef.current, 'ski').catch(e => console.warn('Error auto-fetching ski trails:', e));
+                    }
+                    if (showMtbTrails) {
+                        console.log('[Trails] Auto-fetching MTB trails after map change');
+                        fetchAndDisplayTrails(mapInstanceRef.current, 'mtb').catch(e => console.warn('Error auto-fetching MTB trails:', e));
+                    }
+                }
+            }, 800); // Increased debounce time to 800ms to let Overpass API keep up
+        };
+
+        // Listen for zoom and pan events
+        mapInstanceRef.current.on('zoomend', handleMapChange);
+        mapInstanceRef.current.on('moveend', handleMapChange);
+
+        return () => {
+            if (mapInstanceRef.current) {
+                mapInstanceRef.current.off('zoomend', handleMapChange);
+                mapInstanceRef.current.off('moveend', handleMapChange);
+            }
+            if (trailFetchTimeoutRef.current) {
+                clearTimeout(trailFetchTimeoutRef.current);
+            }
+        };
+    }, [showSkiTrails, showMtbTrails]);
 
     // Update pinMode ref and attach/detach click handler
     useEffect(() => {
@@ -1090,7 +1147,7 @@ function App() {
             // Show ski trails
             console.log('[Trails] Showing ski trails');
             setShowSkiTrails(true);
-            fetchAndDisplayTrails(mapInstanceRef.current, 'ski');
+            fetchAndDisplayTrails(mapInstanceRef.current, 'ski', true);
         }
     };
 
@@ -1114,7 +1171,7 @@ function App() {
             // Show MTB trails
             console.log('[Trails] Showing MTB trails');
             setShowMtbTrails(true);
-            fetchAndDisplayTrails(mapInstanceRef.current, 'mtb');
+            fetchAndDisplayTrails(mapInstanceRef.current, 'mtb', true);
         }
     };
 
