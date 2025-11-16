@@ -31,6 +31,9 @@ function App() {
     const [simIntervalId, setSimIntervalId] = useState(null); // simulation interval id
     const [groupName, setGroupName] = useState(''); // name to create
     const [signingIn, setSigningIn] = useState(false); // prevent duplicate sign-in attempts
+    const [hasStarted, setHasStarted] = useState(false); // controls initial auth/login screen
+    // Derived validation helpers
+    const isUsernameValid = (username && username.trim().length >= 2);
     // Maximum acceptable accuracy (in meters). Only GPS-level precision (< 30m) is accepted.
     // WiFi, BLE, and IP-based locations will be rejected to ensure only high-precision
     // GPS locations are stored. This keeps the most recent GPS location unchanged
@@ -445,14 +448,8 @@ function App() {
     useEffect(() => {
         const unsubscribe = auth.onAuthStateChanged((user) => {
             console.log('[Auth] State changed. User:', !!user, 'Username:', username);
-            // Only set user if we have a username (user clicked sign in)
-            if (user && !username.trim()) {
-                console.log('[Auth] User exists but no username - signing out');
-                auth.signOut();
-                setUser(null);
-            } else {
-                setUser(user);
-            }
+            // Don't forcibly sign out anonymous users; just update state.
+            setUser(user);
             setAuthInitializing(false);
         });
         return () => unsubscribe();
@@ -955,54 +952,6 @@ function App() {
         setCurrentGroup(null);
         setGroupCode('');
         setCurrentGroupName(null);
-    };
-
-    // Toggle ski trails
-    const toggleSkiTrails = () => {
-        if (!mapInstanceRef.current) return;
-        
-        if (showSkiTrails) {
-            // Hide ski trails
-            console.log('[Trails] Hiding ski trails');
-            skiTrailLayersRef.current.forEach(layer => {
-                try {
-                    mapInstanceRef.current.removeLayer(layer);
-                } catch (e) {
-                    console.warn('Error removing ski trail layer:', e);
-                }
-            });
-            skiTrailLayersRef.current = [];
-            setShowSkiTrails(false);
-        } else {
-            // Show ski trails
-            console.log('[Trails] Showing ski trails');
-            setShowSkiTrails(true);
-            fetchAndDisplayTrails(mapInstanceRef.current, 'ski');
-        }
-    };
-
-    // Toggle MTB trails
-    const toggleMtbTrails = () => {
-        if (!mapInstanceRef.current) return;
-        
-        if (showMtbTrails) {
-            // Hide MTB trails
-            console.log('[Trails] Hiding MTB trails');
-            mtbTrailLayersRef.current.forEach(layer => {
-                try {
-                    mapInstanceRef.current.removeLayer(layer);
-                } catch (e) {
-                    console.warn('Error removing MTB trail layer:', e);
-                }
-            });
-            mtbTrailLayersRef.current = [];
-            setShowMtbTrails(false);
-        } else {
-            // Show MTB trails
-            console.log('[Trails] Showing MTB trails');
-            setShowMtbTrails(true);
-            fetchAndDisplayTrails(mapInstanceRef.current, 'mtb');
-        }
     };
 
     // Toggle ski trails
