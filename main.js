@@ -34,11 +34,10 @@ function App() {
     const [hasStarted, setHasStarted] = useState(false); // controls initial auth/login screen
     // Derived validation helpers
     const isUsernameValid = (username && username.trim().length >= 2);
-    // Maximum acceptable accuracy (in meters). Only GPS-level precision (< 30m) is accepted.
-    // WiFi, BLE, and IP-based locations will be rejected to ensure only high-precision
-    // GPS locations are stored. This keeps the most recent GPS location unchanged
-    // when coarser sources are attempted.
-    const MAX_ACCEPTABLE_ACCURACY_METERS = 30; // GPS-only threshold
+    // Maximum acceptable accuracy (in meters). Relaxed to 100m to allow WiFi/cell positioning
+    // Most devices indoors or without GPS hardware (e.g., desktops) typically report 50-200m accuracy
+    // This ensures location tracking works on phones indoors and computers without GPS
+    const MAX_ACCEPTABLE_ACCURACY_METERS = 100; // Allow WiFi/cell positioning
     const [currentGroupName, setCurrentGroupName] = useState(null); // name after join/create
     const [showLocationPrompt, setShowLocationPrompt] = useState(false);
     const [locationError, setLocationError] = useState('');
@@ -828,13 +827,11 @@ function App() {
             (position) => {
                 const { latitude, longitude, accuracy } = position.coords;
                 
-                // Only accept high-precision GPS fixes. Ignore any update that
-                // does not meet the GPS accuracy threshold. This prevents coarse
-                // WiFi/IP fixes from overwriting a true GPS location and also
-                // avoids saving coarse locations at all.
+                // Only accept locations within our accuracy threshold
+                // This helps filter out extremely poor location estimates
                 const isGpsQuality = (typeof accuracy === 'number' && accuracy < MAX_ACCEPTABLE_ACCURACY_METERS);
                 if (!isGpsQuality) {
-                    console.warn(`Ignoring non-GPS-quality location update (accuracy=${accuracy}m). Waiting for a precise GPS fix.`);
+                    console.warn(`Location accuracy too low (${accuracy?.toFixed(1) || 'unknown'}m). Waiting for better signal... (threshold: ${MAX_ACCEPTABLE_ACCURACY_METERS}m)`);
                     return;
                 }
 
